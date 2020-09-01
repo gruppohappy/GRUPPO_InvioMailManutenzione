@@ -6,6 +6,7 @@ using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
 using System.IO;
+using System.IO.Packaging;
 using System.Linq;
 using System.Net;
 using System.Net.Mail;
@@ -23,7 +24,8 @@ namespace InvioMailManutenzione
         private static DataTable tabManutenzione = new DataTable();
         private static DataTable tabRicambi = new DataTable();
         private static DataTable tabControlli = new DataTable();
-
+        private static string dataNotificaAggiornata = "";
+        
         static void Main(string[] args)
         {
             Console.WriteLine($"Avvio programma - {DateTime.Now}");
@@ -50,12 +52,13 @@ namespace InvioMailManutenzione
                         {
                             if (rowManutenzione["EMAIL_RESPONSABILE"].ToString() != "")
                             {
-                                if (UpdateDataNotifica(cnString, rowManutenzione["ID_MANUTENZIONE"].ToString(), rowManutenzione["COMANDO"].ToString()))
+                                dataNotificaAggiornata = UpdateDataNotifica(cnString, rowManutenzione["ID_MANUTENZIONE"].ToString(), rowManutenzione["COMANDO"].ToString());
+                                if (dataNotificaAggiornata != "")
                                 {
                                     Console.WriteLine($"Update data notifica per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]} eseguito correttamente. - {DateTime.Now}");
                                     WriteToLog($"{DateTime.Now} - Update data notifica per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]} eseguito correttamente.");
                                     // Dopo aggiornamento data notifica, spedisco invito al calendar
-                                    if (InvioCalendar(rowManutenzione["EMAIL_RESPONSABILE"].ToString(), rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["NOME_MACCHINA"].ToString(), rowManutenzione["NOME_PERIODICITA"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), rowManutenzione["DATA_NOTIFICA"]) == true && InvioCalendar("manutenzione@esperia-srl.it", rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["NOME_MACCHINA"].ToString(), rowManutenzione["NOME_PERIODICITA"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), rowManutenzione["DATA_NOTIFICA"]) == true)
+                                    if (InvioCalendar(rowManutenzione["EMAIL_RESPONSABILE"].ToString(), rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["NOME_MACCHINA"].ToString(), rowManutenzione["NOME_PERIODICITA"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), dataNotificaAggiornata) == true && InvioCalendar("manutenzione@esperia-srl.it", rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["NOME_MACCHINA"].ToString(), rowManutenzione["NOME_PERIODICITA"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), dataNotificaAggiornata) == true)
                                     {
                                         Console.WriteLine($"Invio invito calendar effettuato con successo per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}");
                                         WriteToLog($"{DateTime.Now} - Invio invito calendar effettuato con successo per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}");
@@ -66,7 +69,7 @@ namespace InvioMailManutenzione
                                     }
                                     // Inserisco nella tabella [LISTA_INTERVENTI] ed invio la mail all'incaricato per avvisarlo dell'inserimento
                                     int idIntervento = 0;
-                                    idIntervento = InsertListaInterventi(cnString, rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["ID_GUASTO"].ToString(), rowManutenzione["ID_MACCHINA"].ToString(), rowManutenzione["FLAG_INTERVENTO_LINEA"].ToString(), rowManutenzione["ID_UTENTE_INCARICATO"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString());
+                                    idIntervento = InsertListaInterventi(cnString, rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["ID_GUASTO"].ToString(), rowManutenzione["ID_MACCHINA"].ToString(), rowManutenzione["FLAG_INTERVENTO_LINEA"].ToString(), rowManutenzione["ID_UTENTE_INCARICATO"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), rowManutenzione["ID_MANUTENZIONE"].ToString());
                                     if (idIntervento > 0)
                                     {                                        
                                         // Inserisco nella tabella LISTA_RICAMBI_UTILIZZATI
@@ -101,7 +104,7 @@ namespace InvioMailManutenzione
                                 }
                                 else
                                 {
-                                    // Nel caso in cui l'update non viene eseguito, avviso via mail
+                                    // Nel caso in cui l'update data notifica non viene eseguito, avviso via mail
                                     SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE GESTIONE MANUTENZIONE", "Update notifica non riuscito.");
                                 }
                             }
@@ -130,7 +133,8 @@ namespace InvioMailManutenzione
         {
             try
             {
-                string oggettoCalendar = $"{_titolo} {_nomeMacchina} - {_periodicita}";
+                
+                string oggettoCalendar = $"{_titolo} - {_nomeMacchina} - {_periodicita}";
                 string corpoCalendar = _descrizione;
                 DateTime dataEvento = Convert.ToDateTime(_dataNotifica);
 
@@ -141,8 +145,8 @@ namespace InvioMailManutenzione
                 sc.EnableSsl = true;
 
                 msg.To.Add(new MailAddress(_email, _email));
-                msg.Subject = _titolo;
-                msg.Body = _descrizione;
+                msg.Subject = oggettoCalendar;
+                msg.Body = corpoCalendar;
 
                 StringBuilder str = new StringBuilder();
                 str.AppendLine("BEGIN:VCALENDAR");
@@ -252,7 +256,7 @@ namespace InvioMailManutenzione
         }
 
         /* Inserisco un nuovo intervento nella tabella LISTA_INTERVENTI */
-        private static int InsertListaInterventi(string _connectionString, string _titoloManutenzione, string _idGuasto, string _idMacchina, string _flagInterventoLinea, string _idUtenteIncaricato, string _descrizioneLavori)
+        private static int InsertListaInterventi(string _connectionString, string _titoloManutenzione, string _idGuasto, string _idMacchina, string _flagInterventoLinea, string _idUtenteIncaricato, string _descrizioneLavori, string _manutenzioneCollegata)
         {
             try
             {
@@ -261,7 +265,7 @@ namespace InvioMailManutenzione
                 cnDb.Open();
                 cmd.CommandText = "INSERT INTO [LISTA_INTERVENTI] (DATA_APERTURA, DATA_CHIUSURA, DATA_ELABORAZIONE, TITOLO, TEMPO_ESECUZIONE, ID_STATO, ID_GUASTO," +
                     "ID_MACCHINA, FLAG_INTERVENTO_LINEA, PRIORITA, ID_UTENTE_APERTURA, ID_UTENTE_ESECUTORE, DESCRIZIONE_GUASTO," +
-                    "ID_ESITO, DESCRIZIONE_LAVORO, DESCRIZIONE_RITARDO, DATA_NUOVO_INTERVENTO) OUTPUT Inserted.ID_INTERVENTO VALUES (" +
+                    "ID_ESITO, DESCRIZIONE_LAVORO, DESCRIZIONE_RITARDO, DATA_NUOVO_INTERVENTO, ID_MANUTENZIONE_COLLEGATA) OUTPUT Inserted.ID_INTERVENTO VALUES (" +
                     $"CONVERT(DATE,'{DateTime.Now.Date.ToString("yyyy-MM-dd")}')," +
                     "NULL," +
                     "NULL," +
@@ -278,7 +282,8 @@ namespace InvioMailManutenzione
                     "NULL," +
                     "NULL," +
                     "NULL," +
-                    "NULL" +
+                    "NULL," +
+                    $"{_manutenzioneCollegata}" +
                     ")";                
                 ID = Convert.ToInt32(cmd.ExecuteScalar());
                 if (ID > 0)
@@ -368,24 +373,26 @@ namespace InvioMailManutenzione
         }
 
         /* Eseguo un update del campo DATA_NOTIFICA, posticipandolo in base alla sua periodicità */
-        private static bool UpdateDataNotifica(string _connectionString, string _IdManutenzione, string _comando)
+        private static string UpdateDataNotifica(string _connectionString, string _IdManutenzione, string _comando)
         {
             try
             {
                 string UpdateDataNotifica = _comando.Replace("DATA_APERTURA", "DATA_NOTIFICA");
+                string dataNotificaAggiornata = "";
                 cnDb.ConnectionString = _connectionString;
                 cnDb.Open();
-                cmd.CommandText = "UPDATE [GESTIONE_MANUTENZIONE].[dbo].[LISTA_MANUTENZIONI] SET [DATA_NOTIFICA] = " + UpdateDataNotifica + $" WHERE ID_MANUTENZIONE = {_IdManutenzione}";
-                cmd.ExecuteNonQuery();
+                cmd.CommandText = "UPDATE [GESTIONE_MANUTENZIONE].[dbo].[LISTA_MANUTENZIONI] SET [DATA_NOTIFICA] = " + UpdateDataNotifica + $" OUTPUT INSERTED.DATA_NOTIFICA WHERE ID_MANUTENZIONE = {_IdManutenzione}";
+                dataNotificaAggiornata = Convert.ToDateTime(cmd.ExecuteScalar()).ToString("yyyy-MM-dd");
+
                 cnDb.Close();
-                return true;
+                return dataNotificaAggiornata;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"ATTENZIONE: Update data notifica per manutenzione #{_IdManutenzione} non riuscito per il database {(_connectionString.Contains(@"SRVDATABASE\SQLGH") ? @"SRVDATABASE\SQLGH" : @"SRVTSESP\SQLESPERIA")}:");
                 Console.WriteLine($"{ex.Message}");
                 WriteToLog($"{DateTime.Now} - ATTENZIONE: Update data notifica per manutenzione #{_IdManutenzione} non riuscito per il database {(_connectionString.Contains(@"SRVDATABASE\SQLGH") ? @"SRVDATABASE\SQLGH" : @"SRVTSESP\SQLESPERIA")}:\n{ex.Message}");
-                return false;
+                return "";
             }
             finally
             {

@@ -25,104 +25,103 @@ namespace InvioMailManutenzione
         private static DataTable tabRicambi = new DataTable();
         private static DataTable tabControlli = new DataTable();
         private static string dataNotificaAggiornata = "";
-        
+
         static void Main(string[] args)
         {
             Console.WriteLine($"Avvio programma - {DateTime.Now}");
             WriteToLog($"{DateTime.Now} - Avvio programma");
             // Recupero le stringhe di connessione
-            string[] connectionStrings = new string[1];
-            //connectionStrings[0] = ConfigurationManager.AppSettings["cnStringSql"].ToString();
-            connectionStrings[0] = ConfigurationManager.AppSettings["cnStringSqlEsp"].ToString();
+            string cnString = ConfigurationManager.AppSettings["cnStringSql"].ToString();
             // Recupero la path del report
             //string reportPath = String.Concat(Path.GetDirectoryName(System.Reflection.Assembly.GetEntryAssembly().Location), @"\REPORT_INTERVENTO.frx");
-            string reportInterventoPath = ConfigurationManager.AppSettings["reportInterventoPath"].ToString();            
+            string reportInterventoPath = ConfigurationManager.AppSettings["reportInterventoPath"].ToString();
             string reportRicambiPath = ConfigurationManager.AppSettings["reportRicambiPath"].ToString();
+            // Recupero mail manutenzione
+            string mailManutenzione = ConfigurationManager.AppSettings["mailManutenzione"].ToString();
             // Eseguo le routine per entrambi i database (Magic ed Esperia)
-            foreach (var cnString in connectionStrings)
+
+            // Tento la connessione al database                
+            if (CheckConnectionToDB(cnString))
             {
-                // Tento la connessione al database                
-                if (CheckConnectionToDB(cnString))
+                // Se true ho testato la connessione al db e procedo
+                ReadFromDB(cnString);
+                if (tabManutenzione.Rows.Count > 0)
                 {
-                    // Se true ho testato la connessione al db e procedo
-                    ReadFromDB(cnString);
-                    if (tabManutenzione.Rows.Count > 0)
+                    foreach (DataRow rowManutenzione in tabManutenzione.Rows)
                     {
-                        foreach (DataRow rowManutenzione in tabManutenzione.Rows)
+                        if (rowManutenzione["EMAIL_RESPONSABILE"].ToString() != "")
                         {
-                            if (rowManutenzione["EMAIL_RESPONSABILE"].ToString() != "")
+                            dataNotificaAggiornata = UpdateDataNotifica(cnString, rowManutenzione["ID_MANUTENZIONE"].ToString(), rowManutenzione["COMANDO"].ToString());
+                            if (dataNotificaAggiornata != "")
                             {
-                                dataNotificaAggiornata = UpdateDataNotifica(cnString, rowManutenzione["ID_MANUTENZIONE"].ToString(), rowManutenzione["COMANDO"].ToString());
-                                if (dataNotificaAggiornata != "")
+                                Console.WriteLine($"Update data notifica per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]} eseguito correttamente. - {DateTime.Now}");
+                                WriteToLog($"{DateTime.Now} - Update data notifica per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]} eseguito correttamente.");
+                                // Dopo aggiornamento data notifica, spedisco invito al calendar
+                                if (InvioCalendar(rowManutenzione["EMAIL_RESPONSABILE"].ToString(), rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["NOME_MACCHINA"].ToString(), rowManutenzione["NOME_PERIODICITA"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), dataNotificaAggiornata) == true && InvioCalendar(mailManutenzione, rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["NOME_MACCHINA"].ToString(), rowManutenzione["NOME_PERIODICITA"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), dataNotificaAggiornata) == true)
                                 {
-                                    Console.WriteLine($"Update data notifica per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]} eseguito correttamente. - {DateTime.Now}");
-                                    WriteToLog($"{DateTime.Now} - Update data notifica per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]} eseguito correttamente.");
-                                    // Dopo aggiornamento data notifica, spedisco invito al calendar
-                                    if (InvioCalendar(rowManutenzione["EMAIL_RESPONSABILE"].ToString(), rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["NOME_MACCHINA"].ToString(), rowManutenzione["NOME_PERIODICITA"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), dataNotificaAggiornata) == true && InvioCalendar("manutenzione@esperia-srl.it", rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["NOME_MACCHINA"].ToString(), rowManutenzione["NOME_PERIODICITA"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), dataNotificaAggiornata) == true)
+                                    Console.WriteLine($"Invio invito calendar effettuato con successo per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}");
+                                    WriteToLog($"{DateTime.Now} - Invio invito calendar effettuato con successo per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}");
+                                }
+                                else
+                                {
+                                    SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE INVITO CALENDAR", $"Invio invito Google Calendar non riuscito per manutenzione #{rowManutenzione["ID_MANUTENZIONE"].ToString()}.\n");
+                                }
+                                // Inserisco nella tabella [LISTA_INTERVENTI] ed invio la mail all'incaricato per avvisarlo dell'inserimento
+                                int idIntervento = 0;
+                                idIntervento = InsertListaInterventi(cnString, rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["ID_GUASTO"].ToString(), rowManutenzione["ID_MACCHINA"].ToString(), rowManutenzione["FLAG_INTERVENTO_LINEA"].ToString(), rowManutenzione["ID_UTENTE_INCARICATO"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), rowManutenzione["ID_MANUTENZIONE"].ToString());
+                                if (idIntervento > 0)
+                                {
+                                    // Inserisco nella tabella LISTA_RICAMBI_UTILIZZATI
+                                    if (InsertRicambiUtilizzati(cnString, rowManutenzione["ID_MANUTENZIONE"].ToString(), idIntervento))
                                     {
-                                        Console.WriteLine($"Invio invito calendar effettuato con successo per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}");
-                                        WriteToLog($"{DateTime.Now} - Invio invito calendar effettuato con successo per manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}");
+                                        Console.WriteLine($"Inserimento ricambi utilizzati avvenuto correttamente per la manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}.");
+                                        WriteToLog($"Inserimento ricambi utilizzati avvenuto correttamente per la manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}.");
                                     }
                                     else
                                     {
-                                        SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE INVITO CALENDAR", $"Invio invito Google Calendar non riuscito per manutenzione #{rowManutenzione["ID_MANUTENZIONE"].ToString()}.\n");
+                                        // Mando mail a IT per avvisare del mancato inserimento nei ricambi utilizzati
+                                        SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE GESTIONE MANUTENZIONE", "Inserimento ricambi utilizzati non riuscito.");
                                     }
-                                    // Inserisco nella tabella [LISTA_INTERVENTI] ed invio la mail all'incaricato per avvisarlo dell'inserimento
-                                    int idIntervento = 0;
-                                    idIntervento = InsertListaInterventi(cnString, rowManutenzione["TITOLO_MANUTENZIONE"].ToString(), rowManutenzione["ID_GUASTO"].ToString(), rowManutenzione["ID_MACCHINA"].ToString(), rowManutenzione["FLAG_INTERVENTO_LINEA"].ToString(), rowManutenzione["ID_UTENTE_INCARICATO"].ToString(), rowManutenzione["DESCRIZIONE_LAVORI"].ToString(), rowManutenzione["ID_MANUTENZIONE"].ToString());
-                                    if (idIntervento > 0)
-                                    {                                        
-                                        // Inserisco nella tabella LISTA_RICAMBI_UTILIZZATI
-                                        if (InsertRicambiUtilizzati(cnString, rowManutenzione["ID_MANUTENZIONE"].ToString(), idIntervento))
-                                        {
-                                            Console.WriteLine($"Inserimento ricambi utilizzati avvenuto correttamente per la manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}.");
-                                            WriteToLog($"Inserimento ricambi utilizzati avvenuto correttamente per la manutenzione #{rowManutenzione["ID_MANUTENZIONE"]}.");                                            
-                                        }
-                                        else
-                                        {
-                                            // Mando mail a IT per avvisare del mancato inserimento nei ricambi utilizzati
-                                            SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE GESTIONE MANUTENZIONE", "Inserimento ricambi utilizzati non riuscito.");
-                                        }
-                                        // Nuova implementazione: a fronte di un intervento aperto, recupero i suoi controlli (da LISTA_CONTROLLI_MANUTENZIONE) e li inserisco nella tabella LISTA_CONTROLLI_INTERVENTO
-                                        if (InsertControlliIntervento(cnString, rowManutenzione["ID_MANUTENZIONE"].ToString(), idIntervento))
-                                        {
-                                            // Inserimento effettuato
-                                            // Se inserito correttamente, mando mail all'incaricato allegando il report intervento 
-                                            InviaMailReport(reportInterventoPath, reportRicambiPath, idIntervento, rowManutenzione["EMAIL_RESPONSABILE"].ToString(), "APERTURA INTERVENTO MANUTENZIONE", $"E' stato aperto un intervento con utente incaricato: {rowManutenzione["UTENTE_INCARICATO"]}. \nIn allegato i dati.");
-                                        }
-                                        else
-                                        {
-                                            // Mando mail a IT per avvisare del mancato inserimento dei controlli intervento
-                                            SendMail("support@gruppo-happy.it","it@gruppo-happy.it", "ERRORE INSERIMENTO CONTROLLI INTERVENTO","Inserimento controlli intervento non riuscito.");
-                                        }
+                                    // Nuova implementazione: a fronte di un intervento aperto, recupero i suoi controlli (da LISTA_CONTROLLI_MANUTENZIONE) e li inserisco nella tabella LISTA_CONTROLLI_INTERVENTO
+                                    if (InsertControlliIntervento(cnString, rowManutenzione["ID_MANUTENZIONE"].ToString(), idIntervento))
+                                    {
+                                        // Inserimento effettuato
+                                        // Se inserito correttamente, mando mail all'incaricato allegando il report intervento 
+                                        InviaMailReport(reportInterventoPath, reportRicambiPath, idIntervento, rowManutenzione["EMAIL_RESPONSABILE"].ToString(), "APERTURA INTERVENTO MANUTENZIONE", $"E' stato aperto un intervento con utente incaricato: {rowManutenzione["UTENTE_INCARICATO"]}. \nIn allegato i dati.");
                                     }
                                     else
                                     {
-                                        // Nel caso un cui non viene eseguito l'insert nella lista interventi, avviso via mail 
-                                        SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE GESTIONE MANUTENZIONE", "Inserimento intervento non riuscito.");
+                                        // Mando mail a IT per avvisare del mancato inserimento dei controlli intervento
+                                        SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE INSERIMENTO CONTROLLI INTERVENTO", "Inserimento controlli intervento non riuscito.");
                                     }
                                 }
                                 else
                                 {
-                                    // Nel caso in cui l'update data notifica non viene eseguito, avviso via mail
-                                    SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE GESTIONE MANUTENZIONE", "Update notifica non riuscito.");
+                                    // Nel caso un cui non viene eseguito l'insert nella lista interventi, avviso via mail 
+                                    SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE GESTIONE MANUTENZIONE", "Inserimento intervento non riuscito.");
                                 }
                             }
+                            else
+                            {
+                                // Nel caso in cui l'update data notifica non viene eseguito, avviso via mail
+                                SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE GESTIONE MANUTENZIONE", "Update notifica non riuscito.");
+                            }
                         }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Nessuna notifica mail da inviare per la data {DateTime.Now.Date.ToString("dd/MM/yyyy")}");
-                        WriteToLog($"Nessuna notifica mail da inviare per la data {DateTime.Now.Date.ToString("dd / MM / yyyy")}");
                     }
                 }
                 else
                 {
-                    // Se false chiudo il programma
-                    Console.WriteLine($"Chiusura programma - {DateTime.Now}\n");
-                    WriteToLog($"Chiusura programma - {DateTime.Now}\n");
+                    Console.WriteLine($"Nessuna notifica mail da inviare per la data {DateTime.Now.Date.ToString("dd/MM/yyyy")}");
+                    WriteToLog($"Nessuna notifica mail da inviare per la data {DateTime.Now.Date.ToString("dd / MM / yyyy")}");
                 }
             }
+            else
+            {
+                // Se false chiudo il programma
+                Console.WriteLine($"Chiusura programma - {DateTime.Now}\n");
+                WriteToLog($"Chiusura programma - {DateTime.Now}\n");
+            }
+
             // Chiusura programma 
             Console.WriteLine($"Chiusura programma - {DateTime.Now}\n");
             WriteToLog($"Chiusura programma - {DateTime.Now}\n");
@@ -133,58 +132,66 @@ namespace InvioMailManutenzione
         {
             try
             {
-                
-                string oggettoCalendar = $"{_titolo} - {_nomeMacchina} - {_periodicita}";
-                string corpoCalendar = _descrizione;
-                DateTime dataEvento = Convert.ToDateTime(_dataNotifica);
+                if (_email != "")
+                {
+                    string oggettoCalendar = $"{_titolo} - {_nomeMacchina} - {_periodicita}";
+                    string corpoCalendar = _descrizione;
+                    DateTime dataEvento = Convert.ToDateTime(_dataNotifica);
 
-                MailMessage msg = new MailMessage();
-                SmtpClient sc = new SmtpClient("smtp.gmail.com", 587);
-                msg.From = new MailAddress("support@gruppo-happy.it", _titolo);
-                sc.Credentials = new NetworkCredential("support@gruppo-happy.it", "7t9Pe!aB");
-                sc.EnableSsl = true;
+                    MailMessage msg = new MailMessage();
+                    SmtpClient sc = new SmtpClient("smtp.gmail.com", 587);
+                    msg.From = new MailAddress("support@gruppo-happy.it", _titolo);
+                    sc.Credentials = new NetworkCredential("support@gruppo-happy.it", "7t9Pe!aB");
+                    sc.EnableSsl = true;
 
-                msg.To.Add(new MailAddress(_email, _email));
-                msg.Subject = oggettoCalendar;
-                msg.Body = corpoCalendar;
+                    msg.To.Add(new MailAddress(_email, _email));
+                    msg.Subject = oggettoCalendar;
+                    msg.Body = corpoCalendar;
 
-                StringBuilder str = new StringBuilder();
-                str.AppendLine("BEGIN:VCALENDAR");
-                str.AppendLine("PRODID:-//GeO");
-                str.AppendLine("VERSION:2.0");
-                str.AppendLine("METHOD:REQUEST");
-                str.AppendLine("BEGIN:VEVENT");
-                //str.AppendLine(string.Format("DTSTART:{0:yyyyMMddTHHmmssZ}", _dataEvento));
-                //str.AppendLine(string.Format("DTSTAMP:{0:yyyyMMddTHHmmssZ}", DateTime.UtcNow));
-                //str.AppendLine(string.Format("DTEND:{0:yyyyMMddTHHmmssZ}", _dataEvento));
-                str.AppendLine(string.Format("DTSTART:{0:yyyyMMdd}", dataEvento));
-                str.AppendLine(string.Format("DTSTAMP:{0:yyyyMMdd}", DateTime.UtcNow));
-                str.AppendLine(string.Format("DTEND:{0:yyyyMMdd}", dataEvento));
-                //str.AppendLine("LOCATION: " + Direccion);
-                str.AppendLine(string.Format("UID:{0}", Guid.NewGuid()));
-                //str.AppendLine(string.Format("DESCRIPTION:{0}", msg.Body));
-                str.AppendLine(string.Format("DESCRIPTION;ENCODING=QUOTED-PRINTABLE:{0}", msg.Body));
+                    StringBuilder str = new StringBuilder();
+                    str.AppendLine("BEGIN:VCALENDAR");
+                    str.AppendLine("PRODID:-//GeO");
+                    str.AppendLine("VERSION:2.0");
+                    str.AppendLine("METHOD:REQUEST");
+                    str.AppendLine("BEGIN:VEVENT");
+                    //str.AppendLine(string.Format("DTSTART:{0:yyyyMMddTHHmmssZ}", _dataEvento));
+                    //str.AppendLine(string.Format("DTSTAMP:{0:yyyyMMddTHHmmssZ}", DateTime.UtcNow));
+                    //str.AppendLine(string.Format("DTEND:{0:yyyyMMddTHHmmssZ}", _dataEvento));
+                    str.AppendLine(string.Format("DTSTART:{0:yyyyMMdd}", dataEvento));
+                    str.AppendLine(string.Format("DTSTAMP:{0:yyyyMMdd}", DateTime.UtcNow));
+                    str.AppendLine(string.Format("DTEND:{0:yyyyMMdd}", dataEvento));
+                    //str.AppendLine("LOCATION: " + Direccion);
+                    str.AppendLine(string.Format("UID:{0}", Guid.NewGuid()));
+                    //str.AppendLine(string.Format("DESCRIPTION:{0}", msg.Body));
+                    str.AppendLine(string.Format("DESCRIPTION;ENCODING=QUOTED-PRINTABLE:{0}", msg.Body));
 
-                str.AppendLine(string.Format("X-ALT-DESC;FMTTYPE=text/html:{0}", msg.Body));
-                str.AppendLine(string.Format("SUMMARY;ENCODING=QUOTED-PRINTABLE:{0}", msg.Subject));
-                str.AppendLine(string.Format("ORGANIZER:MAILTO:{0}", msg.From.Address));
+                    str.AppendLine(string.Format("X-ALT-DESC;FMTTYPE=text/html:{0}", msg.Body));
+                    str.AppendLine(string.Format("SUMMARY;ENCODING=QUOTED-PRINTABLE:{0}", msg.Subject));
+                    str.AppendLine(string.Format("ORGANIZER:MAILTO:{0}", msg.From.Address));
 
-                str.AppendLine(string.Format("ATTENDEE;CN=\"{0}\";RSVP=TRUE:mailto:{1}", msg.To[0].DisplayName, msg.To[0].Address));
+                    str.AppendLine(string.Format("ATTENDEE;CN=\"{0}\";RSVP=TRUE:mailto:{1}", msg.To[0].DisplayName, msg.To[0].Address));
 
-                str.AppendLine("BEGIN:VALARM");
-                str.AppendLine("TRIGGER:-PT15M");
-                str.AppendLine("ACTION:DISPLAY");
-                str.AppendLine("DESCRIPTION;ENCODING=QUOTED-PRINTABLE:Reminder");
-                str.AppendLine("END:VALARM");
-                str.AppendLine("END:VEVENT");
-                str.AppendLine("END:VCALENDAR");
-                System.Net.Mime.ContentType type = new System.Net.Mime.ContentType("text/calendar");
-                type.Parameters.Add("method", "REQUEST");
-                //type.Parameters.Add("method", "PUBLISH");
-                //type.Parameters.Add("name", "Cita.ics");
-                msg.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(str.ToString(), type));
-                sc.Send(msg);
-                return true;
+                    str.AppendLine("BEGIN:VALARM");
+                    str.AppendLine("TRIGGER:-PT15M");
+                    str.AppendLine("ACTION:DISPLAY");
+                    str.AppendLine("DESCRIPTION;ENCODING=QUOTED-PRINTABLE:Reminder");
+                    str.AppendLine("END:VALARM");
+                    str.AppendLine("END:VEVENT");
+                    str.AppendLine("END:VCALENDAR");
+                    System.Net.Mime.ContentType type = new System.Net.Mime.ContentType("text/calendar");
+                    type.Parameters.Add("method", "REQUEST");
+                    //type.Parameters.Add("method", "PUBLISH");
+                    //type.Parameters.Add("name", "Cita.ics");
+                    msg.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(str.ToString(), type));
+                    sc.Send(msg);
+                    return true;
+                }
+                else
+                {
+                    WriteToLog($"{DateTime.Now} - Mail invito calendar non compilata.");
+                    return false;
+                }
+
             }
             catch (Exception ex)
             {
@@ -225,7 +232,7 @@ namespace InvioMailManutenzione
             }
         }
 
-        /* Inserimento ricambi */ 
+        /* Inserimento ricambi */
         private static bool InsertRicambiUtilizzati(string _connectionString, string _idManutenzione, int _idIntervento)
         {
             try
@@ -284,7 +291,7 @@ namespace InvioMailManutenzione
                     "NULL," +
                     "NULL," +
                     $"{_manutenzioneCollegata}" +
-                    ")";                
+                    ")";
                 ID = Convert.ToInt32(cmd.ExecuteScalar());
                 if (ID > 0)
                 {

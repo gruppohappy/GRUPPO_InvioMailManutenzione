@@ -1,19 +1,13 @@
 ﻿using FastReport;
 using FastReport.Utils;
 using System;
-using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
 using System.IO;
-using System.IO.Packaging;
-using System.Linq;
 using System.Net;
 using System.Net.Mail;
-using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
-using System.Threading.Tasks;
-using System.Windows.Media;
 
 namespace InvioMailManutenzione
 {
@@ -24,6 +18,7 @@ namespace InvioMailManutenzione
         private static DataTable tabManutenzione = new DataTable();
         private static DataTable tabRicambi = new DataTable();
         private static DataTable tabControlli = new DataTable();
+        private static DataTable tabInterventiTemporanei = new DataTable();
         private static string dataNotificaAggiornata = "";
 
         static void Main(string[] args)
@@ -38,12 +33,17 @@ namespace InvioMailManutenzione
             string reportRicambiPath = ConfigurationManager.AppSettings["reportRicambiPath"].ToString();
             // Recupero mail manutenzione
             string mailManutenzione = ConfigurationManager.AppSettings["mailManutenzione"].ToString();
-            // Eseguo le routine per entrambi i database (Magic ed Esperia)
+            // Imposto la routine per entrambi i database (Magic ed Esperia): discrimino la destinazione in base alla connection string definita nell'app.config
 
             // Tento la connessione al database                
             if (CheckConnectionToDB(cnString))
             {
-                // Se true ho testato la connessione al db e procedo
+                /* Se true ho testato la connessione al db e procedo  */
+
+                // Nuova implementazione: controllo presenza interventi temporanei ed inserimento
+                InsertInterventoTemporaneo(cnString, reportInterventoPath, reportRicambiPath);
+
+                // Leggo dal database se ci sono manutenzioni attive con data notifica ad oggi
                 ReadFromDB(cnString);
                 if (tabManutenzione.Rows.Count > 0)
                 {
@@ -51,6 +51,7 @@ namespace InvioMailManutenzione
                     {
                         if (rowManutenzione["EMAIL_RESPONSABILE"].ToString() != "")
                         {
+                            
                             dataNotificaAggiornata = UpdateDataNotifica(cnString, rowManutenzione["ID_MANUTENZIONE"].ToString(), rowManutenzione["COMANDO"].ToString());
                             if (dataNotificaAggiornata != "")
                             {
@@ -117,14 +118,106 @@ namespace InvioMailManutenzione
             }
             else
             {
-                // Se false chiudo il programma
+                // Connessione al database non riuscita, chiudo il programma
                 Console.WriteLine($"Chiusura programma - {DateTime.Now}\n");
                 WriteToLog($"Chiusura programma - {DateTime.Now}\n");
             }
 
-            // Chiusura programma 
+            // Ho finito il processo e chiudo il programma
             Console.WriteLine($"Chiusura programma - {DateTime.Now}\n");
             WriteToLog($"Chiusura programma - {DateTime.Now}\n");
+        }
+
+        /* Metodo che controlla la presenza di interventi temporanei con data nuovo intervento ad oggi, se si viene creato un nuovo intervento*/
+        private static void InsertInterventoTemporaneo(string _connectionString, string _reportInterventoPath, string _reportRicambiPath)
+        {
+            try
+            {
+                tabInterventiTemporanei.Clear();
+                string today = DateTime.Now.Date.ToString("yyyy-MM-dd");
+                cnDb.ConnectionString = _connectionString;
+                cnDb.Open();
+                cmd.Connection = cnDb;
+                cmd.CommandText = $"SELECT * FROM ANAGRAFICA_V_INTERVENTI_TEMPORANEI WHERE FLAG_INTERVENTO_TEMPORANEO = 1 AND DATA_NUOVO_INTERVENTO = '{today}'";
+                using (SqlDataAdapter da = new SqlDataAdapter(cmd))
+                {
+                    da.Fill(tabInterventiTemporanei);
+                }
+
+                if (tabInterventiTemporanei.Rows.Count > 0)
+                {
+                    // Ho trovato interventi temporanei
+                    foreach (DataRow row in tabInterventiTemporanei.Rows)
+                    {                       
+                        int ID = 0;
+                        // Inserisco un nuovo intervento temporaneo con stessi dati e con ID_INTERVENTO_COLLEGATO il mio ID di partenza
+                        cmd.CommandText = "INSERT INTO [LISTA_INTERVENTI] (DATA_APERTURA, DATA_CHIUSURA, DATA_ELABORAZIONE, TITOLO, TEMPO_ESECUZIONE, ID_STATO, ID_GUASTO," +
+                            "ID_MACCHINA, FLAG_INTERVENTO_LINEA, PRIORITA, ID_UTENTE_APERTURA, ID_UTENTE_ESECUTORE, DESCRIZIONE_GUASTO," +
+                            "ID_ESITO, DESCRIZIONE_LAVORO, DESCRIZIONE_RITARDO, DATA_NUOVO_INTERVENTO, FLAG_INTERVENTO_TEMPORANEO ,ID_MANUTENZIONE_COLLEGATA, ID_INTERVENTO_TEMPORANEO_COLLEGATO) OUTPUT Inserted.ID_INTERVENTO VALUES (" +
+                            $"CONVERT(DATE,'{DateTime.Now.Date.ToString("yyyy-MM-dd")}')," + // Data apertura 
+                            $"NULL," +      // Data chiusura
+                            $"NULL," +      // Data elaborazione
+                            $"'{row["TITOLO"].ToString()}'," +      // TITOLO
+                            $"NULL," +    //TEMPO ESECUZIONE
+                            $"1," +       // ID STATO
+                            $"'{row["ID_GUASTO"].ToString()}'," +       // ID GUASTO
+                            $"'{row["ID_MACCHINA"].ToString()}'," +     // ID MACCHINA 
+                            $"'{row["FLAG_INTERVENTO_LINEA"].ToString()}'," +       // FLAG INTERVENTO LINEA
+                            $"'{row["PRIORITA"].ToString()}'," +        //  PRIORITA
+                            $"'{row["ID_UTENTE_APERTURA"].ToString()}'," +      // ID_UTENTE_APERTURA
+                            $"NULL," +        // ID UTENTE ESECUTORE
+                            $"'{row["DESCRIZIONE_GUASTO"].ToString()}'," +      // DESCRIZIONE GUASTO
+                            $"NULL," +        // ID ESITO
+                            $"NULL," +        // DESCRIZIONE LAVORO
+                            $"NULL," +        // DESCRIZIONE RITARDO 
+                            $"NULL," +          // DATA NUOVO INTERVENTO
+                            $"'{row["FLAG_INTERVENTO_TEMPORANEO"].ToString()}'," +  // FLAG INTERVENTO TEMPORANEO
+                            $"'{row["ID_MANUTENZIONE_COLLEGATA"].ToString()}'," +       // ID MANUTENZIONE COLLEGATA
+                            $"'{row["ID_INTERVENTO"].ToString()}'" +    // ID_INTERVENTO_TEMPORANEO_ASSOCIATO --> E' l'ID INTERVENTO dell'intervento di partenza.
+                            ")";
+                        ID = Convert.ToInt32(cmd.ExecuteScalar());
+                        cnDb.Close();
+                        if (ID > 0)
+                        {
+                            Console.WriteLine($"Creazione nuovo intervento temporaneo effettuata per il database {(_connectionString.Contains(@"SRVDATABASE\SQLGH") ? @"SRVDATABASE\SQLGH" : @"SRVTSESP\SQLESPERIA")}. ID associato: {ID}");
+                            WriteToLog($"Creazione nuovo intervento temporaneo effettuata per il database { (_connectionString.Contains(@"SRVDATABASE\SQLGH") ? @"SRVDATABASE\SQLGH" : @"SRVTSESP\SQLESPERIA")}. ID associato: { ID}");
+                          
+                            // Nuova implementazione: a fronte di un intervento aperto, recupero i suoi controlli (da LISTA_CONTROLLI_MANUTENZIONE) e li inserisco nella tabella LISTA_CONTROLLI_INTERVENTO
+                            if (InsertControlliIntervento(_connectionString, row["ID_MANUTENZIONE_COLLEGATA"].ToString(), ID))
+                            {
+                                // Inserimento effettuato
+                                // Se inserito correttamente, mando mail all'incaricato allegando il report intervento                                 
+                                InviaMailReport(_reportInterventoPath, _reportRicambiPath, ID, row["EMAIL_RESPONSABILE"].ToString(), "APERTURA INTERVENTO TEMPORANEO", $"E' stato aperto un intervento temporaneo. \nIn allegato i dati.");
+                            }
+                            else
+                            {
+                                // Mando mail a IT per avvisare del mancato inserimento dei controlli intervento
+                                SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE INSERIMENTO CONTROLLI INTERVENTO", "Inserimento controlli intervento non riuscito.");
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Non c'è nessun intervento temporaneo
+                    Console.WriteLine($"{DateTime.Now} - Nessun intervento temporaneo trovato.");
+                    return;
+                }
+                return;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"{DateTime.Now} - {ex.Message}");
+                WriteToLog($"{DateTime.Now} - {ex.Message}");
+                return;
+            }
+            finally
+            {
+                if (cnDb.State != ConnectionState.Closed)
+                {
+                    cnDb.Close();
+                }
+            }
         }
 
         /* Metodo di invio invito Google Calendar via mail */
@@ -503,7 +596,7 @@ namespace InvioMailManutenzione
             {
                 Console.WriteLine($"{DateTime.Now} - Invio report intervento e ricambi #{_idIntervento} via mail non riuscito: {ex.Message}");
                 WriteToLog($"{DateTime.Now} - Invio report intervento e ricambi #{_idIntervento} via mail non riuscito: {ex.Message}");
-                SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", $"Errore invio report intervento e ricambi #{_idIntervento}", $"Errore invio report intervento con ID in oggetto.\n{ex.Message}");
+                //SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", $"Errore invio report intervento e ricambi #{_idIntervento}", $"Errore invio report intervento con ID in oggetto.\n{ex.Message}");
                 return false;
             }
         }

@@ -173,9 +173,9 @@ namespace InvioMailManutenzione
                             $"NULL," +        // DESCRIZIONE LAVORO
                             $"NULL," +        // DESCRIZIONE RITARDO 
                             $"NULL," +          // DATA NUOVO INTERVENTO
-                            $"'{row["FLAG_INTERVENTO_TEMPORANEO"].ToString()}'," +  // FLAG INTERVENTO TEMPORANEO
-                            $"'{row["ID_MANUTENZIONE_COLLEGATA"].ToString()}'," +       // ID MANUTENZIONE COLLEGATA
-                            $"'{row["ID_INTERVENTO"].ToString()}'" +    // ID_INTERVENTO_TEMPORANEO_ASSOCIATO --> E' l'ID INTERVENTO dell'intervento di partenza.
+                            $"'NULL'," +  // FLAG INTERVENTO TEMPORANEO
+                            $"'NULL," +       // ID MANUTENZIONE COLLEGATA
+                            $"NULL" +    // ID_INTERVENTO_TEMPORANEO_ASSOCIATO --> E' l'ID INTERVENTO dell'intervento di partenza.
                             ")";
                         ID = Convert.ToInt32(cmd.ExecuteScalar());
                         cnDb.Close();

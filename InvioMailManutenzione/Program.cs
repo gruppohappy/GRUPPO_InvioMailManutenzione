@@ -26,6 +26,7 @@ namespace InvioMailManutenzione
             Console.WriteLine($"Avvio programma - {DateTime.Now}");
             WriteToLog($"{DateTime.Now} - Avvio programma");
             // Recupero le stringhe di connessione
+            
             string cnString = ConfigurationManager.AppSettings["cnStringSql"].ToString();
             // Recupero la path del report
             //string reportPath = String.Concat(Path.GetDirectoryName(System.Reflection.Assembly.GetEntryAssembly().Location), @"\REPORT_INTERVENTO.frx");
@@ -133,6 +134,7 @@ namespace InvioMailManutenzione
         {
             try
             {
+                Console.WriteLine($"{DateTime.Now} - Inizio ricerca interventi temporanei...");
                 tabInterventiTemporanei.Clear();
                 string today = DateTime.Now.Date.ToString("yyyy-MM-dd");
                 cnDb.ConnectionString = _connectionString;
@@ -181,19 +183,29 @@ namespace InvioMailManutenzione
                         {
                             Console.WriteLine($"Creazione nuovo intervento temporaneo effettuata per il database {(_connectionString.Contains(@"SRVDATABASE\SQLGH") ? @"SRVDATABASE\SQLGH" : @"SRVTSESP\SQLESPERIA")}. ID associato: {ID}");
                             WriteToLog($"Creazione nuovo intervento temporaneo effettuata per il database { (_connectionString.Contains(@"SRVDATABASE\SQLGH") ? @"SRVDATABASE\SQLGH" : @"SRVTSESP\SQLESPERIA")}. ID associato: { ID}");
-                          
-                            // Nuova implementazione: a fronte di un intervento aperto, recupero i suoi controlli (da LISTA_CONTROLLI_MANUTENZIONE) e li inserisco nella tabella LISTA_CONTROLLI_INTERVENTO
-                            if (InsertControlliIntervento(_connectionString, row["ID_MANUTENZIONE_COLLEGATA"].ToString(), ID))
+
+                            if (row["ID_MANUTENZIONE_COLLEGATA"].ToString() != "")
                             {
-                                // Inserimento effettuato
-                                // Se inserito correttamente, mando mail all'incaricato allegando il report intervento                                 
-                                InviaMailReport(_reportInterventoPath, _reportRicambiPath, ID, row["EMAIL_RESPONSABILE"].ToString(), "APERTURA INTERVENTO TEMPORANEO", $"E' stato aperto un intervento temporaneo. \nIn allegato i dati.");
+                                // Esiste manutenzione collegata
+                                // Nuova implementazione: a fronte di un intervento aperto, recupero i suoi controlli (da LISTA_CONTROLLI_MANUTENZIONE) e li inserisco nella tabella LISTA_CONTROLLI_INTERVENTO
+                                if (InsertControlliIntervento(_connectionString, row["ID_MANUTENZIONE_COLLEGATA"].ToString(), ID))
+                                {
+                                    // Inserimento effettuato
+                                    // Se inserito correttamente, mando mail all'incaricato allegando il report intervento                                 
+                                    InviaMailReport(_reportInterventoPath, _reportRicambiPath, ID, row["EMAIL_RESPONSABILE"].ToString(), "APERTURA INTERVENTO TEMPORANEO", $"E' stato aperto un intervento temporaneo. \nIn allegato i dati.");
+                                }
+                                else
+                                {
+                                    // Mando mail a IT per avvisare del mancato inserimento dei controlli intervento
+                                    SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE INSERIMENTO CONTROLLI INTERVENTO", "Inserimento controlli intervento non riuscito.");
+                                }
                             }
-                            else
-                            {
-                                // Mando mail a IT per avvisare del mancato inserimento dei controlli intervento
-                                SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE INSERIMENTO CONTROLLI INTERVENTO", "Inserimento controlli intervento non riuscito.");
-                            }
+                            
+                        }
+                        else
+                        {
+                            Console.WriteLine($"{DateTime.Now} - Nessun intervento temporaneo trovato.");
+                            WriteToLog($"{DateTime.Now} - Nessun intervento temporaneo trovato.");
                         }
                     }
                 }

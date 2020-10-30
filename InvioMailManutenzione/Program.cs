@@ -135,6 +135,7 @@ namespace InvioMailManutenzione
             try
             {
                 Console.WriteLine($"{DateTime.Now} - Inizio ricerca interventi temporanei...");
+                WriteToLog($"{DateTime.Now} - Inizio ricerca interventi temporanei...");
                 tabInterventiTemporanei.Clear();
                 string today = DateTime.Now.Date.ToString("yyyy-MM-dd");
                 cnDb.ConnectionString = _connectionString;
@@ -173,8 +174,8 @@ namespace InvioMailManutenzione
                             $"NULL," +        // DESCRIZIONE LAVORO
                             $"NULL," +        // DESCRIZIONE RITARDO 
                             $"NULL," +          // DATA NUOVO INTERVENTO
-                            $"'NULL'," +  // FLAG INTERVENTO TEMPORANEO
-                            $"'NULL," +       // ID MANUTENZIONE COLLEGATA
+                            $"NULL," +  // FLAG INTERVENTO TEMPORANEO
+                            $"NULL," +       // ID MANUTENZIONE COLLEGATA
                             $"NULL" +    // ID_INTERVENTO_TEMPORANEO_ASSOCIATO --> E' l'ID INTERVENTO dell'intervento di partenza.
                             ")";
                         ID = Convert.ToInt32(cmd.ExecuteScalar());
@@ -204,8 +205,8 @@ namespace InvioMailManutenzione
                         }
                         else
                         {
-                            Console.WriteLine($"{DateTime.Now} - Nessun intervento temporaneo trovato.");
-                            WriteToLog($"{DateTime.Now} - Nessun intervento temporaneo trovato.");
+                            Console.WriteLine($"{DateTime.Now} - Nessun intervento temporaneo inserito.");
+                            WriteToLog($"{DateTime.Now} - Nessun intervento temporaneo inserito.");
                         }
                     }
                 }
@@ -213,6 +214,7 @@ namespace InvioMailManutenzione
                 {
                     // Non c'è nessun intervento temporaneo
                     Console.WriteLine($"{DateTime.Now} - Nessun intervento temporaneo trovato.");
+                    WriteToLog($"{DateTime.Now} - Nessun intervento temporaneo trovato.");
                     return;
                 }
                 return;

@@ -201,7 +201,30 @@ namespace InvioMailManutenzione
                                     SendMail("support@gruppo-happy.it", "it@gruppo-happy.it", "ERRORE INSERIMENTO CONTROLLI INTERVENTO", "Inserimento controlli intervento non riuscito.");
                                 }
                             }
-                            
+                            else
+                            { // Se non c'è manutenzione collegata
+                                try
+                                {
+                                    // Recupero i controlli associati alla MACCHINA di cui è stato inserito l'intervento
+                                    tabControlli.Clear();
+                                    cnDb.ConnectionString = _connectionString;
+                                    cnDb.Open();
+                                    cmd.CommandText = "INSERT INTO [LISTA_CONTROLLI_INTERVENTO] (ID_CONTROLLO, ID_INTERVENTO) " +
+                                        $"SELECT ID_CONTROLLO, {ID} FROM V_CONTROLLI_INTERVENTO_TEMPORANEO WHERE ID_INTERVENTO = {row["ID_INTERVENTO"]} ";                                        
+                                    cmd.ExecuteScalar();
+                                    cnDb.Close();
+                                    // Inserimento effettuato
+                                    // Se inserito correttamente, mando mail all'incaricato allegando il report intervento                                 
+                                    InviaMailReport(_reportInterventoPath, _reportRicambiPath, ID, row["EMAIL_RESPONSABILE"].ToString(), "APERTURA INTERVENTO TEMPORANEO", $"E' stato aperto un intervento temporaneo. \nIn allegato i dati.");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Errore nell'inserimento controlli intervento temporaneo:\n{ex.Message}");
+                                    WriteToLog($"{DateTime.Now} - Errore inserimento controlli intervento temporaneo:\n{ex.ToString()}");
+                                    return;
+                                }
+                            }
+
                         }
                         else
                         {
